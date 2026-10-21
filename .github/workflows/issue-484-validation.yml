@@ -1,0 +1,43 @@
+name: Issue 484 isolated validation
+on:
+  push:
+    branches: [validation/484-controls]
+permissions:
+  contents: read
+defaults:
+  run:
+    shell: bash
+env:
+  CARGO_BUILD_JOBS: 2
+  CARGO_PROFILE_DEV_DEBUG: 0
+  CARGO_PROFILE_TEST_DEBUG: 0
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+        with:
+          cache-on-failure: true
+      - name: Format contribution files
+        run: |
+          mkdir -p /tmp/issue-484-results/formatted
+          rustfmt --edition 2021 crates/cli/src/tui/app.rs crates/cli/src/tui/state.rs crates/cli/src/tui/widgets/controls.rs
+          cp crates/cli/src/tui/app.rs crates/cli/src/tui/state.rs crates/cli/src/tui/widgets/controls.rs /tmp/issue-484-results/formatted/
+      - name: TUI tests and terminal preview
+        run: cargo test -p grat tui:: -- --nocapture 2>&1 | tee /tmp/issue-484-results/tui.log
+      - name: Workspace tests
+        if: success()
+        run: cargo test --workspace --all-targets --all-features 2>&1 | tee /tmp/issue-484-results/workspace.log
+      - name: Clippy
+        if: success() || failure()
+        run: cargo clippy -p grat --all-targets 2>&1 | tee /tmp/issue-484-results/clippy.log
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: issue-484-results
+          path: /tmp/issue-484-results
