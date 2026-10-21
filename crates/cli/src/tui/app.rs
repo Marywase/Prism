@@ -1,31 +1,246 @@
+use std::{
+    io::{self, IsTerminal},
+    time::Duration,
+};
+
+use crossterm::{
+    cursor::{Hide, Show},
+    event::{self, Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers},
+    execute,
+    terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
+};
 use grat_core::types::config::NetworkConfig;
+use ratatui::{
+    backend::CrosstermBackend,
+    layout::{Constraint, Direction, Layout},
+    style::{Color, Style},
+    widgets::{Block, Borders, List, ListItem, ListState, Paragraph, Wrap},
+    Frame, Terminal,
+};
+
+use super::{
+    state::{Panel, TuiState},
+    widgets::controls,
+};
+
+/// Restore the terminal on normal exit, I/O errors, and panic unwinding.
+struct TerminalGuard;
+
+impl TerminalGuard {
+    fn enter() -> io::Result<Self> {
+        enable_raw_mode()?;
+        let guard = Self;
+        execute!(io::stdout(), EnterAlternateScreen, Hide)?;
+        Ok(guard)
+    }
+}
+
+impl Drop for TerminalGuard {
+    fn drop(&mut self) {
+        let _ = disable_raw_mode();
+        let _ = execute!(io::stdout(), LeaveAlternateScreen, Show);
+    }
+}
 
 pub async fn launch(tx_hash: &str, network: &NetworkConfig) -> anyhow::Result<()> {
-    let state = crate::tui::state::TuiState {
-        tx_hash: tx_hash.to_string(),
-        selected_panel: crate::tui::state::Panel::Timeline,
-        scroll_offset: 0,
-    };
-
-    for panel in [
-        crate::tui::state::Panel::Timeline,
-        crate::tui::state::Panel::Inspector,
-        crate::tui::state::Panel::Controls,
-    ] {
-        match panel {
-            crate::tui::state::Panel::Timeline => crate::tui::widgets::timeline::render(),
-            crate::tui::state::Panel::Inspector => crate::tui::widgets::inspector::render(),
-            crate::tui::state::Panel::Controls => crate::tui::widgets::controls::render(),
+    anyhow::ensure!(
+        io::stdin().is_terminal() && io::stdout().is_terminal(),
+        "Interactive replay requires a terminal; use grat trace for redirected output."
+    );
+    // Fetch/reconstruct before entering raw mode: replay errors retain normal terminal output.
+    let trace = grat_core::replay::replay_transaction(tx_hash, network).await?;
+    let mut state = TuiState::new(trace);
+    let _guard = TerminalGuard::enter()?;
+    let mut terminal = Terminal::new(CrosstermBackend::new(io::stdout()))?;
+    loop {
+        terminal.draw(|frame| render(frame, &state))?;
+        if event::poll(Duration::from_millis(100))? {
+            match event::read()? {
+                Event::Key(key) if handle_key(&mut state, key) => break,
+                Event::Resize(_, _) => terminal.autoresize()?,
+                _ => {}
+            }
         }
     }
-    println!(
-        "TUI debugger launching for {} on {:?}...",
-        state.tx_hash, network.network
-    );
-    println!(
-        "Selected panel: {:?} (scroll offset: {})",
-        state.selected_panel, state.scroll_offset
-    );
-    println!("(Not yet implemented — requires ratatui setup)");
     Ok(())
+}
+
+fn handle_key(state: &mut TuiState, key: KeyEvent) -> bool {
+    if key.kind == KeyEventKind::Release {
+        return false;
+    }
+    if key.code == KeyCode::Char('c') && key.modifiers.contains(KeyModifiers::CONTROL) {
+        return true;
+    }
+    if key
+        .modifiers
+        .intersects(KeyModifiers::CONTROL | KeyModifiers::ALT)
+    {
+        return false;
+    }
+    match key.code {
+        KeyCode::Char('q') | KeyCode::Esc => return true,
+        KeyCode::Tab => state.switch_panel(key.modifiers.contains(KeyModifiers::SHIFT)),
+        KeyCode::BackTab => state.switch_panel(true),
+        KeyCode::Char('j') | KeyCode::Down | KeyCode::Char('s') => state.next(),
+        KeyCode::Char('k') | KeyCode::Up => state.previous(),
+        KeyCode::Char('o') => state.step_over(),
+        _ => {}
+    }
+    false
+}
+
+fn panel(title: &str, selected: bool) -> Block<'_> {
+    Block::default()
+        .borders(Borders::ALL)
+        .title(title)
+        .border_style(Style::default().fg(if selected {
+            Color::Cyan
+        } else {
+            Color::DarkGray
+        }))
+}
+
+fn render(frame: &mut Frame<'_>, state: &TuiState) {
+    let area = frame.area();
+    let sections = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Length(1),
+            Constraint::Min(0),
+            Constraint::Length(controls::height(area.width).min(area.height.saturating_sub(1))),
+        ])
+        .split(area);
+    frame.render_widget(
+        Paragraph::new(format!("Replay {} | {}", state.tx_hash, state.network)),
+        sections[0],
+    );
+    let panels = Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints([Constraint::Percentage(50), Constraint::Percentage(50)])
+        .split(sections[1]);
+    let items: Vec<ListItem<'_>> = state
+        .entries
+        .iter()
+        .map(|entry| {
+            ListItem::new(format!(
+                "{}{}{}",
+                "  ".repeat(entry.depth.min(20)),
+                entry.function,
+                if entry.is_error { " [error]" } else { "" }
+            ))
+        })
+        .collect();
+    let mut selection = ListState::default();
+    if !state.entries.is_empty() {
+        selection.select(Some(state.scroll_offset));
+    }
+    frame.render_stateful_widget(
+        List::new(items)
+            .block(panel("Timeline", state.selected_panel == Panel::Timeline))
+            .highlight_symbol("> ")
+            .highlight_style(Style::default().fg(Color::Yellow)),
+        panels[0],
+        &mut selection,
+    );
+    let details = state.entries.get(state.scroll_offset).map_or_else(
+        || "No recorded invocations. [q] quits.".to_owned(),
+        |entry| {
+            format!(
+                "Contract: {}\nFunction: {}\nArguments: {}\nReturn: {}\nError: {}",
+                entry.contract,
+                entry.function,
+                entry.arguments.join(", "),
+                entry.return_value.as_deref().unwrap_or("unavailable"),
+                entry.is_error
+            )
+        },
+    );
+    frame.render_widget(
+        Paragraph::new(details)
+            .wrap(Wrap { trim: true })
+            .block(panel("Inspector", state.selected_panel == Panel::Inspector)),
+        panels[1],
+    );
+    controls::render(frame, sections[2], state);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use ratatui::backend::TestBackend;
+
+    fn press(state: &mut TuiState, code: KeyCode) -> bool {
+        handle_key(state, KeyEvent::new(code, KeyModifiers::NONE))
+    }
+
+    #[test]
+    fn panels_cycle_in_both_directions() {
+        let mut state = super::super::state::fixture();
+        for expected in [Panel::Inspector, Panel::Controls, Panel::Timeline] {
+            assert!(!press(&mut state, KeyCode::Tab));
+            assert_eq!(state.selected_panel, expected);
+        }
+        press(&mut state, KeyCode::BackTab);
+        assert_eq!(state.selected_panel, Panel::Controls);
+    }
+
+    #[test]
+    fn navigation_and_steps_use_real_trace_boundaries_and_depth() {
+        let mut state = super::super::state::fixture();
+        press(&mut state, KeyCode::Char('k'));
+        assert_eq!(state.scroll_offset, 0);
+        press(&mut state, KeyCode::Char('s'));
+        assert_eq!(state.entries[state.scroll_offset].function, "child");
+        press(&mut state, KeyCode::Up);
+        press(&mut state, KeyCode::Char('o'));
+        assert_eq!(state.entries[state.scroll_offset].function, "sibling");
+        press(&mut state, KeyCode::Char('j'));
+        assert_eq!(state.scroll_offset, 2);
+        assert_eq!(state.replay_status(), "Replay: End 3/3");
+        state.entries.clear();
+        state.scroll_offset = 0;
+        for code in [KeyCode::Char('s'), KeyCode::Char('o'), KeyCode::Char('k')] {
+            press(&mut state, code);
+        }
+        assert_eq!(state.scroll_offset, 0);
+        assert_eq!(state.replay_status(), "Replay: no invocations");
+    }
+
+    #[test]
+    fn releases_are_ignored_and_quit_keys_work() {
+        let mut state = super::super::state::fixture();
+        let mut release = KeyEvent::new(KeyCode::Char('j'), KeyModifiers::NONE);
+        release.kind = KeyEventKind::Release;
+        assert!(!handle_key(&mut state, release));
+        assert_eq!(state.scroll_offset, 0);
+        assert!(press(&mut state, KeyCode::Char('q')));
+        assert!(press(&mut state, KeyCode::Esc));
+        assert!(handle_key(
+            &mut state,
+            KeyEvent::new(KeyCode::Char('c'), KeyModifiers::CONTROL)
+        ));
+    }
+
+    #[test]
+    fn layout_resizes_and_keeps_footer_visible() {
+        let state = super::super::state::fixture();
+        for (width, height) in [(120, 24), (60, 20), (40, 15), (1, 1), (0, 0)] {
+            let mut terminal = Terminal::new(TestBackend::new(width, height)).unwrap();
+            terminal.draw(|frame| render(frame, &state)).unwrap();
+            if width >= 40 {
+                let text: String = terminal
+                    .backend()
+                    .buffer()
+                    .content
+                    .iter()
+                    .map(|cell| cell.symbol())
+                    .collect();
+                assert!(text.contains("[q] Quit") && text.contains("Replay: Paused"));
+            }
+            if width == 120 {
+                println!("{}", terminal.backend());
+            }
+        }
+    }
 }
