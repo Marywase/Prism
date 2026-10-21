@@ -29,7 +29,8 @@ jobs:
           rustfmt --edition 2021 crates/cli/src/tui/app.rs crates/cli/src/tui/state.rs crates/cli/src/tui/widgets/controls.rs
           cp crates/cli/src/tui/app.rs crates/cli/src/tui/state.rs crates/cli/src/tui/widgets/controls.rs /tmp/issue-484-results/formatted/
       - name: TUI tests and terminal preview
-        run: cargo test -p grat tui:: -- --nocapture 2>&1 | tee /tmp/issue-484-results/tui.log
+        run: |
+          cargo test -p grat tui:: -- --nocapture 2>&1 | tee /tmp/issue-484-results/tui.log
       - name: Workspace tests
         if: success()
         run: cargo test --workspace --all-targets --all-features 2>&1 | tee /tmp/issue-484-results/workspace.log
