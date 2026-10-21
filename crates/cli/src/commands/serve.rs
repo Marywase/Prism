@@ -55,6 +55,17 @@ pub enum TraceStreamMessage {
     TraceError {
         error: String,
     },
+    DiagnosticEvents {
+        events: Vec<DiagnosticEventMessage>,
+    },
+}
+
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct DiagnosticEventMessage {
+    pub event_type: String,
+    pub topics: Vec<String>,
+    pub data: std::collections::HashMap<String, String>,
+    pub timeline_position: usize,
 }
 
 pub async fn run(args: ServeArgs, network: &NetworkConfig) -> anyhow::Result<()> {
@@ -268,6 +279,23 @@ async fn stream_trace_replay(
             before: entry.before.clone(),
             after: entry.after.clone(),
             change_type: format!("{:?}", entry.change_type),
+        });
+    }
+
+    if !result.diagnostic_events.is_empty() {
+        let diagnostic_messages: Vec<DiagnosticEventMessage> = result
+            .diagnostic_events
+            .iter()
+            .enumerate()
+            .map(|(idx, event)| DiagnosticEventMessage {
+                event_type: event.event_type.clone(),
+                topics: event.topics.clone(),
+                data: event.data.clone(),
+                timeline_position: idx,
+            })
+            .collect();
+        let _ = sender.send(TraceStreamMessage::DiagnosticEvents {
+            events: diagnostic_messages,
         });
     }
 

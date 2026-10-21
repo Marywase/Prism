@@ -1,5 +1,5 @@
 import { useState, useCallback } from "react";
-import { useWebSocket, TraceStreamCallbacks } from "./useWebSocket";
+import { useWebSocket, TraceStreamCallbacks, DiagnosticEvent } from "./useWebSocket";
 
 export interface TraceData {
   tx_hash: string;
@@ -16,6 +16,7 @@ export interface TraceData {
     write_limit: number;
   };
   state_diff: any[];
+  diagnostic_events: DiagnosticEvent[];
   completed: boolean;
   error?: string;
 }
@@ -31,6 +32,7 @@ export function useTrace(wsUrl?: string) {
         ledger_sequence: data.ledger_sequence,
         nodes: [],
         state_diff: [],
+        diagnostic_events: [],
         completed: false,
       });
       setLoading(true);
@@ -59,6 +61,15 @@ export function useTrace(wsUrl?: string) {
         return {
           ...prev,
           state_diff: [...prev.state_diff, data],
+        };
+      });
+    },
+    onDiagnosticEvents: (data) => {
+      setTrace((prev) => {
+        if (!prev) return null;
+        return {
+          ...prev,
+          diagnostic_events: data.events,
         };
       });
     },

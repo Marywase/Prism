@@ -5,6 +5,7 @@ import { useTrace } from "@/hooks/useTrace";
 import { ExecutionTimeline } from "@/components/trace/ExecutionTimeline";
 import { StateDiffViewer } from "@/components/trace/StateDiffViewer";
 import { ResourceProfile } from "@/components/trace/ResourceProfile";
+import { DiagnosticEvents } from "@/components/trace/DiagnosticEvents";
 import LoadingSpinner from "@/components/shared/LoadingSpinner";
 
 export default function TracePage() {
@@ -140,6 +141,10 @@ export default function TracePage() {
 
           {trace.state_diff.length > 0 && (
             <StateDiffViewer entries={trace.state_diff} />
+          )}
+
+          {trace.diagnostic_events && trace.diagnostic_events.length > 0 && (
+            <DiagnosticEvents events={trace.diagnostic_events} />
           )}
         </div>
       )}

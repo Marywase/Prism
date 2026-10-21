@@ -23,6 +23,13 @@ export interface StateDiffEntry {
   change_type: string;
 }
 
+export interface DiagnosticEvent {
+  event_type: string;
+  topics: string[];
+  data: Record<string, string>;
+  timeline_position: number;
+}
+
 export interface TraceStreamCallbacks {
   onTraceStarted?: (data: { tx_hash: string; ledger_sequence: number }) => void;
   onTraceNode?: (data: TraceNode) => void;
@@ -33,6 +40,7 @@ export interface TraceStreamCallbacks {
     duration_ms: number;
   }) => void;
   onTraceError?: (data: { error: string }) => void;
+  onDiagnosticEvents?: (data: { events: DiagnosticEvent[] }) => void;
 }
 
 export function useWebSocket(url: string, callbacks?: TraceStreamCallbacks) {
@@ -75,6 +83,9 @@ export function useWebSocket(url: string, callbacks?: TraceStreamCallbacks) {
           case "trace_error":
             callbacks?.onTraceError?.(message);
             setError(message.error);
+            break;
+          case "diagnostic_events":
+            callbacks?.onDiagnosticEvents?.(message);
             break;
           default:
             console.warn("Unknown message type:", message.type);
