@@ -29,8 +29,14 @@ impl TuiState {
     pub fn new(trace: ExecutionTrace) -> Self {
         let mut entries = Vec::new();
         append_invocations(&trace.invocations, 0, &mut entries);
-        Self { tx_hash: trace.tx_hash, network: trace.network, selected_panel: Panel::Timeline,
-            scroll_offset: 0, entries, resources: trace.resource_profile }
+        Self {
+            tx_hash: trace.tx_hash,
+            network: trace.network,
+            selected_panel: Panel::Timeline,
+            scroll_offset: 0,
+            entries,
+            resources: trace.resource_profile,
+        }
     }
 
     pub fn switch_panel(&mut self, reverse: bool) {
@@ -42,7 +48,10 @@ impl TuiState {
     }
 
     pub fn next(&mut self) {
-        self.scroll_offset = self.scroll_offset.saturating_add(1).min(self.entries.len().saturating_sub(1));
+        self.scroll_offset = self
+            .scroll_offset
+            .saturating_add(1)
+            .min(self.entries.len().saturating_sub(1));
     }
 
     pub fn previous(&mut self) {
@@ -51,8 +60,14 @@ impl TuiState {
 
     /// Advance past descendants of the selected recorded invocation.
     pub fn step_over(&mut self) {
-        let Some(current) = self.entries.get(self.scroll_offset) else { return };
-        self.scroll_offset = self.entries.iter().enumerate().skip(self.scroll_offset + 1)
+        let Some(current) = self.entries.get(self.scroll_offset) else {
+            return;
+        };
+        self.scroll_offset = self
+            .entries
+            .iter()
+            .enumerate()
+            .skip(self.scroll_offset + 1)
             .find(|(_, entry)| entry.depth <= current.depth)
             .map_or(self.entries.len().saturating_sub(1), |(index, _)| index);
     }
@@ -62,17 +77,33 @@ impl TuiState {
     }
 
     pub fn replay_status(&self) -> String {
-        if self.entries.is_empty() { "Replay: no invocations".to_owned() } else {
-            format!("Replay: {} {}/{}", if self.can_step() { "Paused" } else { "End" }, self.scroll_offset + 1, self.entries.len())
+        if self.entries.is_empty() {
+            "Replay: no invocations".to_owned()
+        } else {
+            format!(
+                "Replay: {} {}/{}",
+                if self.can_step() { "Paused" } else { "End" },
+                self.scroll_offset + 1,
+                self.entries.len()
+            )
         }
     }
 }
 
-fn append_invocations(invocations: &[ContractInvocation], depth: usize, entries: &mut Vec<TraceEntry>) {
+fn append_invocations(
+    invocations: &[ContractInvocation],
+    depth: usize,
+    entries: &mut Vec<TraceEntry>,
+) {
     for invocation in invocations {
-        entries.push(TraceEntry { depth, contract: invocation.contract_id.clone(),
-            function: invocation.function_name.clone(), arguments: invocation.arguments.clone(),
-            return_value: invocation.return_value.clone(), is_error: invocation.is_error });
+        entries.push(TraceEntry {
+            depth,
+            contract: invocation.contract_id.clone(),
+            function: invocation.function_name.clone(),
+            arguments: invocation.arguments.clone(),
+            return_value: invocation.return_value.clone(),
+            is_error: invocation.is_error,
+        });
         append_invocations(&invocation.sub_invocations, depth + 1, entries);
     }
 }
@@ -81,13 +112,35 @@ fn append_invocations(invocations: &[ContractInvocation], depth: usize, entries:
 pub fn fixture() -> TuiState {
     use grat_core::types::trace::{StateDiff, TraceId};
     fn invocation(name: &str, children: Vec<ContractInvocation>) -> ContractInvocation {
-        ContractInvocation { trace_id: TraceId("fixture".to_owned()), contract_id: "CEXAMPLE".to_owned(),
-            function_name: name.to_owned(), arguments: vec![], return_value: None,
-            host_calls: vec![], sub_invocations: children, total_cpu_instructions: 0,
-            total_memory_bytes: 0, is_error: false }
+        ContractInvocation {
+            trace_id: TraceId("fixture".to_owned()),
+            contract_id: "CEXAMPLE".to_owned(),
+            function_name: name.to_owned(),
+            arguments: vec![],
+            return_value: None,
+            host_calls: vec![],
+            sub_invocations: children,
+            total_cpu_instructions: 0,
+            total_memory_bytes: 0,
+            is_error: false,
+        }
     }
-    TuiState::new(ExecutionTrace { tx_hash: "abc123".to_owned(), network: "testnet".to_owned(), ledger_sequence: 1,
-        invocations: vec![invocation("parent", vec![invocation("child", vec![])]), invocation("sibling", vec![])],
-        state_diff: StateDiff::default(), diagnostic_events: vec![],
-        resource_profile: ResourceProfile { total_cpu: 250, cpu_limit: 1000, total_memory: 500, memory_limit: 1000, ..ResourceProfile::default() } })
+    TuiState::new(ExecutionTrace {
+        tx_hash: "abc123".to_owned(),
+        network: "testnet".to_owned(),
+        ledger_sequence: 1,
+        invocations: vec![
+            invocation("parent", vec![invocation("child", vec![])]),
+            invocation("sibling", vec![]),
+        ],
+        state_diff: StateDiff::default(),
+        diagnostic_events: vec![],
+        resource_profile: ResourceProfile {
+            total_cpu: 250,
+            cpu_limit: 1000,
+            total_memory: 500,
+            memory_limit: 1000,
+            ..ResourceProfile::default()
+        },
+    })
 }

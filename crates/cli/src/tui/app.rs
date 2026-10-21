@@ -1,12 +1,27 @@
-use std::{io::{self, IsTerminal}, time::Duration};
+use std::{
+    io::{self, IsTerminal},
+    time::Duration,
+};
 
-use crossterm::{cursor::{Hide, Show}, event::{self, Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers}, execute,
-    terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen}};
+use crossterm::{
+    cursor::{Hide, Show},
+    event::{self, Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers},
+    execute,
+    terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
+};
 use grat_core::types::config::NetworkConfig;
-use ratatui::{backend::CrosstermBackend, layout::{Constraint, Direction, Layout}, style::{Color, Style},
-    widgets::{Block, Borders, List, ListItem, ListState, Paragraph, Wrap}, Frame, Terminal};
+use ratatui::{
+    backend::CrosstermBackend,
+    layout::{Constraint, Direction, Layout},
+    style::{Color, Style},
+    widgets::{Block, Borders, List, ListItem, ListState, Paragraph, Wrap},
+    Frame, Terminal,
+};
 
-use super::{state::{Panel, TuiState}, widgets::controls};
+use super::{
+    state::{Panel, TuiState},
+    widgets::controls,
+};
 
 /// Restore the terminal on normal exit, I/O errors, and panic unwinding.
 struct TerminalGuard;
@@ -28,8 +43,10 @@ impl Drop for TerminalGuard {
 }
 
 pub async fn launch(tx_hash: &str, network: &NetworkConfig) -> anyhow::Result<()> {
-    anyhow::ensure!(io::stdin().is_terminal() && io::stdout().is_terminal(),
-        "Interactive replay requires a terminal; use grat trace for redirected output.");
+    anyhow::ensure!(
+        io::stdin().is_terminal() && io::stdout().is_terminal(),
+        "Interactive replay requires a terminal; use grat trace for redirected output."
+    );
     // Fetch/reconstruct before entering raw mode: replay errors retain normal terminal output.
     let trace = grat_core::replay::replay_transaction(tx_hash, network).await?;
     let mut state = TuiState::new(trace);
@@ -49,9 +66,18 @@ pub async fn launch(tx_hash: &str, network: &NetworkConfig) -> anyhow::Result<()
 }
 
 fn handle_key(state: &mut TuiState, key: KeyEvent) -> bool {
-    if key.kind == KeyEventKind::Release { return false; }
-    if key.code == KeyCode::Char('c') && key.modifiers.contains(KeyModifiers::CONTROL) { return true; }
-    if key.modifiers.intersects(KeyModifiers::CONTROL | KeyModifiers::ALT) { return false; }
+    if key.kind == KeyEventKind::Release {
+        return false;
+    }
+    if key.code == KeyCode::Char('c') && key.modifiers.contains(KeyModifiers::CONTROL) {
+        return true;
+    }
+    if key
+        .modifiers
+        .intersects(KeyModifiers::CONTROL | KeyModifiers::ALT)
+    {
+        return false;
+    }
     match key.code {
         KeyCode::Char('q') | KeyCode::Esc => return true,
         KeyCode::Tab => state.switch_panel(key.modifiers.contains(KeyModifiers::SHIFT)),
@@ -65,31 +91,77 @@ fn handle_key(state: &mut TuiState, key: KeyEvent) -> bool {
 }
 
 fn panel(title: &str, selected: bool) -> Block<'_> {
-    Block::default().borders(Borders::ALL).title(title)
-        .border_style(Style::default().fg(if selected { Color::Cyan } else { Color::DarkGray }))
+    Block::default()
+        .borders(Borders::ALL)
+        .title(title)
+        .border_style(Style::default().fg(if selected {
+            Color::Cyan
+        } else {
+            Color::DarkGray
+        }))
 }
 
 fn render(frame: &mut Frame<'_>, state: &TuiState) {
     let area = frame.area();
-    let sections = Layout::default().direction(Direction::Vertical).constraints([
-        Constraint::Length(1), Constraint::Min(0), Constraint::Length(controls::height(area.width).min(area.height.saturating_sub(1)))
-    ]).split(area);
-    frame.render_widget(Paragraph::new(format!("Replay {} | {}", state.tx_hash, state.network)), sections[0]);
-    let panels = Layout::default().direction(Direction::Horizontal)
-        .constraints([Constraint::Percentage(50), Constraint::Percentage(50)]).split(sections[1]);
-    let items: Vec<ListItem<'_>> = state.entries.iter().map(|entry| {
-        ListItem::new(format!("{}{}{}", "  ".repeat(entry.depth.min(20)), entry.function, if entry.is_error { " [error]" } else { "" }))
-    }).collect();
+    let sections = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Length(1),
+            Constraint::Min(0),
+            Constraint::Length(controls::height(area.width).min(area.height.saturating_sub(1))),
+        ])
+        .split(area);
+    frame.render_widget(
+        Paragraph::new(format!("Replay {} | {}", state.tx_hash, state.network)),
+        sections[0],
+    );
+    let panels = Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints([Constraint::Percentage(50), Constraint::Percentage(50)])
+        .split(sections[1]);
+    let items: Vec<ListItem<'_>> = state
+        .entries
+        .iter()
+        .map(|entry| {
+            ListItem::new(format!(
+                "{}{}{}",
+                "  ".repeat(entry.depth.min(20)),
+                entry.function,
+                if entry.is_error { " [error]" } else { "" }
+            ))
+        })
+        .collect();
     let mut selection = ListState::default();
-    if !state.entries.is_empty() { selection.select(Some(state.scroll_offset)); }
-    frame.render_stateful_widget(List::new(items).block(panel("Timeline", state.selected_panel == Panel::Timeline))
-        .highlight_symbol("> ").highlight_style(Style::default().fg(Color::Yellow)), panels[0], &mut selection);
+    if !state.entries.is_empty() {
+        selection.select(Some(state.scroll_offset));
+    }
+    frame.render_stateful_widget(
+        List::new(items)
+            .block(panel("Timeline", state.selected_panel == Panel::Timeline))
+            .highlight_symbol("> ")
+            .highlight_style(Style::default().fg(Color::Yellow)),
+        panels[0],
+        &mut selection,
+    );
     let details = state.entries.get(state.scroll_offset).map_or_else(
         || "No recorded invocations. [q] quits.".to_owned(),
-        |entry| format!("Contract: {}\nFunction: {}\nArguments: {}\nReturn: {}\nError: {}", entry.contract,
-            entry.function, entry.arguments.join(", "), entry.return_value.as_deref().unwrap_or("unavailable"), entry.is_error));
-    frame.render_widget(Paragraph::new(details).wrap(Wrap { trim: true })
-        .block(panel("Inspector", state.selected_panel == Panel::Inspector)), panels[1]);
+        |entry| {
+            format!(
+                "Contract: {}\nFunction: {}\nArguments: {}\nReturn: {}\nError: {}",
+                entry.contract,
+                entry.function,
+                entry.arguments.join(", "),
+                entry.return_value.as_deref().unwrap_or("unavailable"),
+                entry.is_error
+            )
+        },
+    );
+    frame.render_widget(
+        Paragraph::new(details)
+            .wrap(Wrap { trim: true })
+            .block(panel("Inspector", state.selected_panel == Panel::Inspector)),
+        panels[1],
+    );
     controls::render(frame, sections[2], state);
 }
 
@@ -126,8 +198,11 @@ mod tests {
         press(&mut state, KeyCode::Char('j'));
         assert_eq!(state.scroll_offset, 2);
         assert_eq!(state.replay_status(), "Replay: End 3/3");
-        state.entries.clear(); state.scroll_offset = 0;
-        for code in [KeyCode::Char('s'), KeyCode::Char('o'), KeyCode::Char('k')] { press(&mut state, code); }
+        state.entries.clear();
+        state.scroll_offset = 0;
+        for code in [KeyCode::Char('s'), KeyCode::Char('o'), KeyCode::Char('k')] {
+            press(&mut state, code);
+        }
         assert_eq!(state.scroll_offset, 0);
         assert_eq!(state.replay_status(), "Replay: no invocations");
     }
@@ -141,7 +216,10 @@ mod tests {
         assert_eq!(state.scroll_offset, 0);
         assert!(press(&mut state, KeyCode::Char('q')));
         assert!(press(&mut state, KeyCode::Esc));
-        assert!(handle_key(&mut state, KeyEvent::new(KeyCode::Char('c'), KeyModifiers::CONTROL)));
+        assert!(handle_key(
+            &mut state,
+            KeyEvent::new(KeyCode::Char('c'), KeyModifiers::CONTROL)
+        ));
     }
 
     #[test]
@@ -151,10 +229,18 @@ mod tests {
             let mut terminal = Terminal::new(TestBackend::new(width, height)).unwrap();
             terminal.draw(|frame| render(frame, &state)).unwrap();
             if width >= 40 {
-                let text: String = terminal.backend().buffer().content.iter().map(|cell| cell.symbol()).collect();
+                let text: String = terminal
+                    .backend()
+                    .buffer()
+                    .content
+                    .iter()
+                    .map(|cell| cell.symbol())
+                    .collect();
                 assert!(text.contains("[q] Quit") && text.contains("Replay: Paused"));
             }
-            if width == 120 { println!("{}", terminal.backend()); }
+            if width == 120 {
+                println!("{}", terminal.backend());
+            }
         }
     }
 }
