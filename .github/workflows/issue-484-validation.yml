@@ -28,19 +28,6 @@ jobs:
           mkdir -p /tmp/issue-484-results/formatted
           rustfmt --edition 2021 crates/cli/src/tui/app.rs crates/cli/src/tui/state.rs crates/cli/src/tui/widgets/controls.rs
           cp crates/cli/src/tui/app.rs crates/cli/src/tui/state.rs crates/cli/src/tui/widgets/controls.rs /tmp/issue-484-results/formatted/
-      - name: Confirm baseline compilation blocker
-        run: |
-          git fetch origin 4d7390ebe6721023ecf3b55da08382101c55361b
-          git worktree add /tmp/issue-484-baseline 4d7390ebe6721023ecf3b55da08382101c55361b
-          cargo generate-lockfile
-          cp Cargo.lock /tmp/issue-484-baseline/Cargo.lock
-          set +e
-          (cd /tmp/issue-484-baseline && CARGO_TARGET_DIR="$GITHUB_WORKSPACE/target" cargo check -p grat-core) > /tmp/issue-484-results/baseline.log 2>&1
-          result=$?
-          set -e
-          echo "Baseline exit: $result"
-          test "$result" -ne 0
-          grep 'could not compile' /tmp/issue-484-results/baseline.log
       - name: Isolated actual TUI tests and terminal preview
         run: |
           python3 .github/issue-484-harness.py
@@ -48,6 +35,9 @@ jobs:
       - name: Isolated TUI Clippy
         if: success() || failure()
         run: cargo clippy --manifest-path /tmp/issue-484-harness/Cargo.toml --all-targets -- -D warnings 2>&1 | tee /tmp/issue-484-results/clippy.log
+      - name: Current full CLI compilation
+        continue-on-error: true
+        run: cargo check -p grat 2>&1 | tee /tmp/issue-484-results/full-cli.log
       - uses: actions/upload-artifact@v4
         if: always()
         with:

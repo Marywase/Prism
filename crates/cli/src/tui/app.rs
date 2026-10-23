@@ -14,13 +14,13 @@ use ratatui::{
     backend::CrosstermBackend,
     layout::{Constraint, Direction, Layout},
     style::{Color, Style},
-    widgets::{Block, Borders, List, ListItem, ListState, Paragraph, Wrap},
+    widgets::{Block, Borders, Paragraph, Wrap},
     Frame, Terminal,
 };
 
 use super::{
     state::{Panel, TuiState},
-    widgets::controls,
+    widgets::{controls, timeline},
 };
 
 /// Restore the terminal on normal exit, I/O errors, and panic unwinding.
@@ -119,29 +119,12 @@ fn render(frame: &mut Frame<'_>, state: &TuiState) {
         .direction(Direction::Horizontal)
         .constraints([Constraint::Percentage(50), Constraint::Percentage(50)])
         .split(sections[1]);
-    let items: Vec<ListItem<'_>> = state
-        .entries
-        .iter()
-        .map(|entry| {
-            ListItem::new(format!(
-                "{}{}{}",
-                "  ".repeat(entry.depth.min(20)),
-                entry.function,
-                if entry.is_error { " [error]" } else { "" }
-            ))
-        })
-        .collect();
-    let mut selection = ListState::default();
-    if !state.entries.is_empty() {
-        selection.select(Some(state.scroll_offset));
-    }
-    frame.render_stateful_widget(
-        List::new(items)
-            .block(panel("Timeline", state.selected_panel == Panel::Timeline))
-            .highlight_symbol("> ")
-            .highlight_style(Style::default().fg(Color::Yellow)),
+    timeline::render_with_focus(
+        frame,
         panels[0],
-        &mut selection,
+        &state.invocations,
+        state.scroll_offset,
+        state.selected_panel == Panel::Timeline,
     );
     let details = state.entries.get(state.scroll_offset).map_or_else(
         || "No recorded invocations. [q] quits.".to_owned(),
@@ -223,6 +206,20 @@ mod tests {
     }
 
     #[test]
+    fn timeline_and_inspector_follow_the_controls_selection() {
+        let mut state = super::super::state::fixture();
+        press(&mut state, KeyCode::Char('s'));
+        let mut terminal = Terminal::new(TestBackend::new(120, 24)).unwrap();
+        terminal.draw(|frame| render(frame, &state)).unwrap();
+        let text: String = terminal.backend().buffer().content.iter()
+            .map(|cell| cell.symbol()).collect();
+        assert!(text.contains("Timeline"));
+        assert!(text.contains("Function: child"));
+        assert!(text.contains("Replay: Paused 2/3"));
+        assert_eq!(timeline::count(&state.invocations), state.entries.len());
+    }
+
+    #[test]
     fn layout_resizes_and_keeps_footer_visible() {
         let state = super::super::state::fixture();
         for (width, height) in [(120, 24), (60, 20), (40, 15), (1, 1), (0, 0)] {
@@ -237,6 +234,7 @@ mod tests {
                     .map(|cell| cell.symbol())
                     .collect();
                 assert!(text.contains("[q] Quit") && text.contains("Replay: Paused"));
+                assert!(text.contains("Timeline"));
             }
             if width == 120 {
                 println!("{}", terminal.backend());

@@ -6,6 +6,7 @@ pub struct TuiState {
     pub selected_panel: Panel,
     pub scroll_offset: usize,
     pub entries: Vec<TraceEntry>,
+    pub invocations: Vec<ContractInvocation>,
     pub resources: ResourceProfile,
 }
 
@@ -35,6 +36,7 @@ impl TuiState {
             selected_panel: Panel::Timeline,
             scroll_offset: 0,
             entries,
+            invocations: trace.invocations,
             resources: trace.resource_profile,
         }
     }
