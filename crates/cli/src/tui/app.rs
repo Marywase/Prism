@@ -112,7 +112,10 @@ fn render(frame: &mut Frame<'_>, state: &TuiState) {
         ])
         .split(area);
     frame.render_widget(
-        Paragraph::new(format!("Replay {} | {}", state.tx_hash, state.network)),
+        Paragraph::new(format!(
+            "Replay {} | {} | ledger {}",
+            state.tx_hash, state.network, state.ledger_sequence
+        )),
         sections[0],
     );
     let panels = Layout::default()
@@ -215,6 +218,7 @@ mod tests {
             .map(|cell| cell.symbol()).collect();
         assert!(text.contains("Timeline"));
         assert!(text.contains("Function: child"));
+        assert!(text.contains("ledger 1"));
         assert!(text.contains("Replay: Paused 2/3"));
         assert_eq!(timeline::count(&state.invocations), state.entries.len());
     }

@@ -3,6 +3,7 @@ use grat_core::types::trace::{ContractInvocation, ExecutionTrace, ResourceProfil
 pub struct TuiState {
     pub tx_hash: String,
     pub network: String,
+    pub ledger_sequence: u32,
     pub selected_panel: Panel,
     pub scroll_offset: usize,
     pub entries: Vec<TraceEntry>,
@@ -33,6 +34,7 @@ impl TuiState {
         Self {
             tx_hash: trace.tx_hash,
             network: trace.network,
+            ledger_sequence: trace.ledger_sequence,
             selected_panel: Panel::Timeline,
             scroll_offset: 0,
             entries,
