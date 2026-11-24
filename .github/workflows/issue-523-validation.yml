@@ -4,6 +4,9 @@ on:
     branches: [validation/523-verify-20261124]
 permissions:
   contents: read
+defaults:
+  run:
+    shell: bash
 jobs:
   verify:
     runs-on: ubuntu-latest
@@ -27,11 +30,13 @@ jobs:
           shared-key: issue-523-verification
           cache-on-failure: true
       - name: Create isolated source harnesses
-        run: python3 .github/issue-523-harness.py --repo "$GITHUB_WORKSPACE" --notes /tmp/prism-523 --base-sha 37e3cee1ebe695a8dd09de5753918e433e9196a8
+        run: |
+          python3 .github/issue-523-harness.py --repo "$GITHUB_WORKSPACE" --notes /tmp/prism-523 --base-sha 37e3cee1ebe695a8dd09de5753918e433e9196a8
+          ! grep -E 'baseline-(app|inspector)' /tmp/prism-523/harness/lib.rs
       - name: Prove regressions fail before fixes
         run: |
           set +e
-          cargo test --manifest-path /tmp/prism-523/baseline-harness/Cargo.toml > /tmp/prism-523/baseline-tui.log 2>&1
+          CARGO_TARGET_DIR=/tmp/prism-523-baseline-target cargo test --manifest-path /tmp/prism-523/baseline-harness/Cargo.toml > /tmp/prism-523/baseline-tui.log 2>&1
           result=$?
           set -e
           echo "$result" > /tmp/prism-523/baseline-exit.txt
@@ -56,6 +61,17 @@ jobs:
           result=$?
           echo "$result" > /tmp/prism-523/full-cli-exit.txt
           tail -n 100 /tmp/prism-523/full-cli.log
+          exit "$result"
+      - name: Compare unchanged upstream full CLI compilation
+        continue-on-error: true
+        run: |
+          git worktree add --detach /tmp/prism-523-upstream 37e3cee1ebe695a8dd09de5753918e433e9196a8
+          cp Cargo.lock /tmp/prism-523-upstream/Cargo.lock
+          set +e
+          cargo test --locked --manifest-path /tmp/prism-523-upstream/Cargo.toml -p grat --bin grat tui:: > /tmp/prism-523/upstream-cli.log 2>&1
+          result=$?
+          echo "$result" > /tmp/prism-523/upstream-cli-exit.txt
+          tail -n 100 /tmp/prism-523/upstream-cli.log
           exit "$result"
       - uses: actions/upload-artifact@v4
         if: always()
