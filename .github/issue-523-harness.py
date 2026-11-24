@@ -89,7 +89,6 @@ pub mod tui {
         #[path = "INSPECTOR"] pub mod inspector;
     }
     pub mod app {
-        include!("APP_SOURCE");
         // Test instrumentation in the harness only: exercise the unchanged
         // private production guard on normal return, errors and unwinding.
         pub fn guard_probe(mode: &str) -> std::io::Result<()> {
@@ -100,6 +99,7 @@ pub mod tui {
                 _ => Ok(()),
             }
         }
+        include!("APP_SOURCE");
     }
 }
 '''.replace('REPO', linux_repo).replace('INSPECTOR', inspector).replace('APP_SOURCE', app).replace('OUTPUT', output_type)
