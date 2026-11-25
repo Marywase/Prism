@@ -289,7 +289,7 @@ mod tests {
         let entry = &mut state.entries[0];
         entry.contract = format!("C{}", "A".repeat(55));
         entry.function = "long_function".repeat(10);
-        entry.arguments = vec!["?\n??\r?".repeat(50)];
+        entry.arguments = vec!["\u{e9}\n\u{1f980}\r\u{754c}".repeat(50)];
         entry.return_value = Some("long\nreturn".repeat(50));
         entry.is_error = true;
         for width in [80, 120] {
